@@ -13,7 +13,7 @@ Apify.main(async () => {
     const crawler = new Apify.CheerioCrawler({
         requestQueue,
         useApifyProxy: true,
-        apifyProxyGroups: ['CZECH_LUMINATI'],
+        apifyProxyGroups: ['SHADER'],
         handlePageTimeoutSecs: 60 * 2,
         handlePageFunction: async ({ $ }) => {
             log.info('Page loaded.');
