@@ -26,7 +26,7 @@ Apify.main(async () => {
             const infectedByRegion = rows.map((r) => {
                 const columns = $(r).find('td');
                 const region = $(columns[0]).text();
-                const infectedCount = parseInt($(columns[1]).text());
+                const infectedCount = parseInt($(columns[1]).text(), 10);
                 return {
                     region,
                     infectedCount,
