@@ -37,7 +37,7 @@ Apify.main(async () => {
                 infected: $($(totalRow).find('td')[1]).text(),
                 infectedByRegion,
                 sourceUrl,
-                lastUpdatedAtApify: new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate(), now.getHours(), now.getMinutes())).toISOString()
+                lastUpdatedAtApify: new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate(), now.getHours(), now.getMinutes())).toISOString(),
                 readMe: 'https://apify.com/tugkan/covid-se',
             };
 
