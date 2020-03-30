@@ -1,7 +1,7 @@
 const Apify = require('apify');
 
-const { log } = Apify.utils;
-const sourceUrl = 'https://www.folkhalsomyndigheten.se/smittskydd-beredskap/utbrott/aktuella-utbrott/covid-19/aktuellt-epidemiologiskt-lage/';
+const { log,requestAsBrowser } = Apify.utils;
+const sourceUrl = 'https://services5.arcgis.com/fsYDFeRKu1hELJJs/arcgis/rest/services/FOHM_Covid_19_FME_1/FeatureServer/0/query?f=json&where=Region%20%3C%3E%20%27dummy%27&returnGeometry=false&spatialRel=esriSpatialRelIntersects&outFields=*&orderByFields=Region%20asc&outSR=102100&resultOffset=0&resultRecordCount=25&cacheHint=true';
 const LATEST = 'LATEST';
 
 Apify.main(async () => {
@@ -10,31 +10,68 @@ Apify.main(async () => {
     const dataset = await Apify.openDataset('COVID-19-SWEDEN-HISTORY');
 
     await requestQueue.addRequest({ url: sourceUrl });
-    const crawler = new Apify.CheerioCrawler({
+    const crawler = new Apify.BasicCrawler({
         requestQueue,
         useApifyProxy: true,
-        apifyProxyGroups: ['SHADER'],
-        handlePageTimeoutSecs: 60 * 2,
-        handlePageFunction: async ({ $ }) => {
+        handleRequestTimeoutSecs: 60 * 2,
+        useSessionPool:true,
+        handleRequestFunction: async (context) => {
+            const { request, session } = context;
             log.info('Page loaded.');
             const now = new Date();
 
-            const rows = $($('#content-primary table')[0]).find('tr').get();
-            rows.shift(); // remove title
-            const totalRow = rows.pop();
+            // Send request
+            const response = await requestAsBrowser({
+                url: request.url,
+                method: 'GET',
+                apifyProxyGroups:['SHADER'],
+                timeoutSecs: 120,
+                abortFunction: (res) => {
+                    // Status code check
+                    if (!res || res.statusCode !== 200) {
+                        session.markBad();
+                        return true;
+                    }
+                    session.markGood();
+                    return false;
+                },
+            }).catch((err) => {
+                session.markBad();
+                throw new Error(err);
+            });
 
-            const infectedByRegion = rows.map((r) => {
-                const columns = $(r).find('td');
-                const region = $(columns[0]).text();
-                const infectedCount = parseInt($(columns[1]).text(), 10);
+            const data = response.body;
+
+            const currentData = JSON.parse(data);
+
+            const infectedByRegion = currentData.features.map((r) => {
+                const region = r.attributes.Region;
+                const infectedCount = r.attributes.Totalt_antal_fall;
+                const deathCount = r.attributes.Totalt_antal_avlidna
+                const intensiveCareCount = r.attributes.Totalt_antal_intensivvårdade;;
                 return {
                     region,
                     infectedCount,
+                    deathCount,
+                    intensiveCareCount,
                 };
             });
 
-            const data = {
-                infected: $($(totalRow).find('td')[1]).text(),
+            const {infected, deceased, intensiveCare} = infectedByRegion.reduce((sumObj, val) => ({
+                ...sumObj,
+                infected: val.infectedCount + sumObj.infected,
+                deceased: val.deathCount + sumObj.deceased,
+                intensiveCare: val.intensiveCareCount + sumObj.intensiveCare,
+            }),{
+                infected:0,
+                deceased:0,
+                intensiveCare:0,
+            })
+
+            const returningData = {
+                infected,
+                deceased,
+                intensiveCare,
                 infectedByRegion,
                 sourceUrl,
                 lastUpdatedAtApify: new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate(), now.getHours(), now.getMinutes())).toISOString(),
@@ -44,17 +81,17 @@ Apify.main(async () => {
             // Compare and save to history
             const latest = await kvStore.getValue(LATEST) || {};
             delete latest.lastUpdatedAtApify;
-            const actual = Object.assign({}, data);
+            const actual = Object.assign({}, returningData);
             delete actual.lastUpdatedAtApify;
 
-            await Apify.pushData({...data});
+            await Apify.pushData({...returningData});
 
             if (JSON.stringify(latest) !== JSON.stringify(actual)) {
                 log.info('Data did change :( storing new to dataset.');
-                await dataset.pushData(data);
+                await dataset.pushData(returningData);
             }
 
-            await kvStore.setValue(LATEST, data);
+            await kvStore.setValue(LATEST, returningData);
             log.info('Data stored, finished.');
         },
 
